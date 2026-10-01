@@ -1,5 +1,6 @@
 """Fonctions pures qui enveloppent l'orchestrateur pour la GUI (aucun import de `gradio` ici,
-testables sans lancer de serveur). Zéro changement à runner.py/graph.py/orchestrator.py."""
+testables sans lancer de serveur). Les deux chemins (déterministe et live) passent par le même
+chef, défini dans runner.py."""
 
 from __future__ import annotations
 
@@ -10,8 +11,8 @@ from pathlib import Path
 
 from ..graph import HARD_CAP, build_graph
 from ..llm import build_llm
-from ..orchestrator import AGENTS_BY_NAME, SUPERVISOR, check_demand
-from ..runner import run_scenario
+from ..orchestrator import AGENTS_BY_NAME, SUPERVISOR
+from ..runner import prepare, run_scenario
 from ..state import TeamState
 from ..steps import step_from_name
 from . import broken_registries
@@ -60,12 +61,8 @@ def stream_live(
 ) -> Iterator[dict]:
     state = TeamState(topic=topic, required_steps=[step_from_name(s) for s in steps])
     limit = max_steps if max_steps is not None else HARD_CAP
-    state.step_limit = limit
 
-    motif = check_demand(state, AGENTS_BY_NAME, limit)
-    if motif is not None:
-        state.status = "aborted"
-        state.stop_reason = f"invalid_demand:{motif}"
+    if not prepare(state, AGENTS_BY_NAME, limit):
         yield {"node": None, **_summarize(state)}
         return
 
@@ -81,10 +78,14 @@ def stream_live(
     try:
         client = llm if llm is not None else build_llm()
         graph = build_graph(client, limit)
-        for chunk in graph.stream(state):
+        for chunk in graph.stream(state, {"recursion_limit": 4 * limit + 10}):
             node_name, node_state = next(iter(chunk.items()))
             if node_name == SUPERVISOR:
-                continue
+                # Le superviseur ne produit rien ; on ne transmet que l'arrêt qu'il décide
+                # (limite d'étapes, fin sans clôture), absent des images des agents.
+                if node_state["status"] != "aborted" or last["status"] == "aborted":
+                    continue
+                node_name = None
             last = {
                 "node": node_name,
                 "status": node_state["status"],

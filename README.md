@@ -57,9 +57,10 @@ make down       # stoppe le service docker
 
 Les trois limites connues de la PR précédente sont résolues :
 
-- Le chemin « live » (`graph.py`, LangGraph) câble un flux réel : mêmes garde-fous que le
-  runner déterministe (rôle, budget, limite d'étapes, clôture par le finalizer), un vrai appel
-  LLM par étape. Voir `run_live()` et `tests/test_graph.py`.
+- Le chemin « live » (`graph.py`, LangGraph) câble un flux réel et passe par **le même chef**
+  que le runner déterministe (`runner.py` : `prepare`, `chef_decide`, `chef_turn`) : rôle, budget,
+  limite d'étapes, réception, relance unique, annulation d'un passage refusé, clôture par le
+  finalizer. Un vrai appel LLM par étape. Voir `run_live()` et `tests/test_graph.py`.
 - Un vrai LLM est testé (`tests/test_graph.py::test_run_live_completes_with_a_real_llm`,
   se saute si `AZURE_AI_ENDPOINT`/`AZURE_AI_API_KEY`/`AZURE_AI_MODEL` sont absents).
 - `max_steps` est lu dans la demande (`initial_context`) en priorité, conformément à
@@ -87,7 +88,14 @@ uv sync --extra webapp
 uv run python -m kaldera.webapp.app
 ```
 
-Ouvre `http://localhost:7860`.
+Ouvre `http://localhost:7860` (et non `http://0.0.0.0:7860`, que le navigateur refuse). Si le
+port est déjà pris, une instance tourne déjà : utilise-la, ou arrête-la (Ctrl+C) avant de relancer.
+
+**Architecture en direct.** En tête des onglets « Exécuter » et « Casser un garde-fou », un schéma
+animé montre l'équipe (demande, chef, quatre sub-agents, état partagé, fin ou arrêt) et, étape par
+étape, **par où passe la donnée** : la flèche active s'allume, un point la parcourt dans le sens
+de la donnée, une étiquette dit ce qui est transporté, et l'état partagé se remplit à chaque
+réception acceptée. Le curseur règle la vitesse (secondes par étape). Code : `src/kaldera/webapp/flow_view.py`.
 
 **En production :** `<URL Azure Container Apps — à renseigner après le premier déploiement, voir
 doc/guides/deploiement_azure_portail.md>`. Démarrage à froid possible (scale-to-zero) : ouvrir

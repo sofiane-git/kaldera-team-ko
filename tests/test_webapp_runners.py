@@ -23,7 +23,9 @@ class _FakeLLM:
 
 
 def test_run_deterministic_happy_path():
-    result = runners.run_deterministic("lancement produit", ["RESEARCH", "DRAFT", "REVIEW", "FINALIZE"])
+    result = runners.run_deterministic(
+        "lancement produit", ["RESEARCH", "DRAFT", "REVIEW", "FINALIZE"]
+    )
     assert result["status"] == "done"
     assert result["step_count"] == 4
     assert sorted(result["artifacts"]) == ["draft", "final", "research", "review"]

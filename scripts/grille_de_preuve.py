@@ -37,8 +37,8 @@ DEFECTS = [
     Defect(
         "La limite max_steps n'est pas lue",
         "src/kaldera/runner.py",
-        "        if delegations >= limit:\n",
-        "        if delegations >= HARD_CAP:\n",
+        "    if state.step_count >= limit:\n",
+        "    if state.step_count >= HARD_CAP:\n",
         ("test_step_guard_stops_at_limit",),
     ),
     Defect(
@@ -51,9 +51,9 @@ DEFECTS = [
     Defect(
         "Le chef passe lui-même le statut à done",
         "src/kaldera/runner.py",
-        '        if decision == END:\n            if state.status != "done":',
-        '        if decision == END:\n            state.status = "done"\n'
-        '            if state.status != "done":',
+        '    if decision == END:\n        if state.status != "done":',
+        '    if decision == END:\n        state.status = "done"\n'
+        '        if state.status != "done":',
         ("test_missing_closure_is_detected",),
     ),
     Defect(
@@ -128,29 +128,29 @@ DEFECTS = [
     Defect(
         "Un agent bloqué est relancé sans fin",
         "src/kaldera/runner.py",
-        "        if retried:\n",
-        "        if False:\n",
+        "    if state.retry_used:\n",
+        "    if False:\n",
         ("test_stuck_agent_is_stopped_after_one_retry",),
     ),
     # Défauts propres à l'orchestration cible : chaque renfort doit lui aussi être prouvé.
     Defect(
         "Le chef ne contrôle pas la progression faite par l'agent",
         "src/kaldera/runner.py",
-        "            and progression_ok\n",
+        "        and progression_ok\n",
         "",
         ("test_agent_cannot_drive_progression",),
     ),
     Defect(
         "Les écritures d'un passage refusé ne sont pas annulées",
         "src/kaldera/runner.py",
-        "        store.restore(snapshot)\n",
+        "    store.restore(snapshot)\n",
         "",
         ("test_refused_writes_are_rolled_back",),
     ),
     Defect(
         "Un agent autre que le finalizer peut passer à done",
         "src/kaldera/runner.py",
-        "            and (state.status == status or step is Step.FINALIZE)\n",
+        "        and (state.status == status or step is Step.FINALIZE)\n",
         "",
         ("test_only_finalizer_can_close",),
     ),
@@ -164,8 +164,8 @@ DEFECTS = [
     Defect(
         "La relance n'est pas remise à zéro d'une étape à l'autre",
         "src/kaldera/runner.py",
-        "            retried = False\n            continue\n",
-        "            continue\n",
+        "        state.retry_used = False\n        return\n",
+        "        return\n",
         ("test_retry_is_granted_once_per_step",),
     ),
     Defect(
@@ -185,9 +185,20 @@ DEFECTS = [
     Defect(
         "Un agent qui plante arrête le flux sans code",
         "src/kaldera/runner.py",
-        '        except Exception:\n            failure = "agent_error"\n',
+        "    except Exception:\n        failure = error_code\n",
         "",
         ("test_unexpected_agent_error_is_stopped",),
+    ),
+    Defect(
+        "Le chemin live contourne le chef",
+        "src/kaldera/graph.py",
+        '            chef_turn(state, agent, name, llm=llm, error_code="llm_error")\n',
+        "            agent.run(state, llm=llm)\n            state.step_count += 1\n"
+        "            state.advance()\n",
+        (
+            "test_live_journal_matches_the_deterministic_chief",
+            "test_live_path_retries_once_then_stops",
+        ),
     ),
 ]
 
@@ -196,7 +207,18 @@ FAILED = re.compile(r"^(?:FAILED|ERROR) tests/\S+?::(\w+)(?:\[[^\]]*\])?(?: - (\
 
 def run_tests(root: Path) -> tuple[int, dict[str, str]]:
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-rf", "tests"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-rf",
+            "tests",
+            "--deselect",
+            "tests/test_graph.py::test_run_live_completes_with_a_real_llm",
+        ],
         cwd=root,
         capture_output=True,
         text=True,

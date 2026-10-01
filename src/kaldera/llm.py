@@ -4,6 +4,7 @@ L'API exposée par `AZURE_AI_ENDPOINT` est compatible OpenAI (suffixe `/openai/v
 d'où `ChatOpenAI` plutôt que `langchain-azure-ai` (celui-ci cible l'API
 azure-ai-inference, incompatible avec cette forme d'endpoint — vérifié à la main).
 """
+
 from __future__ import annotations
 
 import os

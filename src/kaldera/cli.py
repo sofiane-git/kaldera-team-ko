@@ -23,7 +23,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Kaldera — rejoue les scénarios fournis, ou lance un flux live (vrai LLM)."
     )
-    parser.add_argument("--live", metavar="SUJET", help="lance un flux réel (vrai LLM) sur ce sujet")
+    parser.add_argument(
+        "--live", metavar="SUJET", help="lance un flux réel (vrai LLM) sur ce sujet"
+    )
     parser.add_argument(
         "--steps",
         default="RESEARCH,DRAFT,REVIEW,FINALIZE",

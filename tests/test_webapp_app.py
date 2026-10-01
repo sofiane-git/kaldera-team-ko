@@ -35,7 +35,14 @@ def test_on_run_live_reorders_steps_before_calling_stream_live(monkeypatch):
 
     def fake_stream_live(topic, steps, llm=None, max_steps=None):
         received["steps"] = steps
-        yield {"node": "researcher", "status": "done", "step_count": 1, "artifacts": {}, "stop_reason": None, "log": []}
+        yield {
+            "node": "researcher",
+            "status": "done",
+            "step_count": 1,
+            "artifacts": {},
+            "stop_reason": None,
+            "log": [],
+        }
 
     monkeypatch.setattr(webapp_app.runners, "stream_live", fake_stream_live)
     list(webapp_app.on_run_live("sujet", ["FINALIZE", "RESEARCH"]))
@@ -64,7 +71,14 @@ def test_on_run_live_respects_the_cost_guard(monkeypatch):
 
     def fake_stream_live(topic, steps, llm=None, max_steps=None):
         calls["n"] += 1
-        yield {"node": "researcher", "status": "done", "step_count": 1, "artifacts": {}, "stop_reason": None, "log": []}
+        yield {
+            "node": "researcher",
+            "status": "done",
+            "step_count": 1,
+            "artifacts": {},
+            "stop_reason": None,
+            "log": [],
+        }
 
     monkeypatch.setattr(webapp_app.runners, "stream_live", fake_stream_live)
     webapp_app._cost_guard._last_call = None  # état propre entre tests
@@ -76,3 +90,36 @@ def test_on_run_live_respects_the_cost_guard(monkeypatch):
     second_output = list(webapp_app.on_run_live("sujet", ["RESEARCH"]))
     assert calls["n"] == 1  # pas de second appel réel : le garde-fou de coût a bloqué
     assert second_output[0]["stop_reason"] == "cooldown"
+
+
+@pytest.mark.parametrize(
+    ("env", "host", "port"),
+    [
+        ({}, "127.0.0.1", 7860),
+        ({"GRADIO_SERVER_NAME": "0.0.0.0", "GRADIO_SERVER_PORT": "7999"}, "0.0.0.0", 7999),
+    ],
+    ids=["local_par_defaut", "conteneur"],
+)
+def test_main_listens_on_a_browsable_address_by_default(monkeypatch, env, host, port):
+    # 0.0.0.0 n'est pas ouvrable dans un navigateur (ERR_ADDRESS_INVALID) : en local, l'app écoute
+    # sur 127.0.0.1 ; seul le conteneur (Dockerfile.web) demande 0.0.0.0.
+    for key in ("GRADIO_SERVER_NAME", "GRADIO_SERVER_PORT"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    launched: dict = {}
+
+    class _FakeDemo:
+        def launch(self, **kwargs):
+            launched.update(kwargs)
+
+    monkeypatch.setattr(webapp_app, "build_app", lambda: _FakeDemo())
+    webapp_app.main()
+    assert launched == {"server_name": host, "server_port": port}
+
+
+def test_deterministic_ui_streams_one_view_per_frame():
+    outputs = list(webapp_app._run_deterministic_ui("sujet", ["RESEARCH", "FINALIZE"], 0.0))
+    assert len(outputs) >= 8  # vérification, 2 × (confie, écrit, accepte), fin, résumé
+    assert all('id="active"' in view for view, _, _ in outputs)
+    assert "statut : done" in outputs[-1][1]

@@ -19,7 +19,9 @@ def test_live_flag_routes_to_run_live(monkeypatch, capsys):
         return state
 
     monkeypatch.setattr(kaldera.graph, "run_live", fake_run_live)
-    monkeypatch.setattr(sys, "argv", ["kaldera", "--live", "sujet test", "--steps", "RESEARCH,FINALIZE"])
+    monkeypatch.setattr(
+        sys, "argv", ["kaldera", "--live", "sujet test", "--steps", "RESEARCH,FINALIZE"]
+    )
 
     cli.main()
 

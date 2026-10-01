@@ -91,6 +91,10 @@ class TeamState:
     log: list[dict] = field(default_factory=list)
     stop_reason: str | None = None
     step_limit: int | None = None
+    # Relance déjà accordée pour l'étape courante (une seule par étape, décision D3).
+    retry_used: bool = False
+    # Agent choisi par le chef pour le prochain tour (chemin live : le routage LangGraph le lit).
+    next_agent: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.artifacts, ArtifactStore):
