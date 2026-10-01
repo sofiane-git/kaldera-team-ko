@@ -11,6 +11,9 @@ COPY specs ./specs
 
 RUN uv sync --no-dev --extra webapp
 
+# Dans le conteneur, écouter sur toutes les interfaces (Azure Container Apps).
+ENV GRADIO_SERVER_NAME=0.0.0.0
+
 EXPOSE 7860
 
 CMD ["uv", "run", "--no-sync", "python", "-m", "kaldera.webapp.app"]

@@ -3,11 +3,13 @@ projection (pas d'auth, pas d'isolation de session — décidé au brainstorming
 
 from __future__ import annotations
 
+import os
+import time
 from collections.abc import Iterator
 
 import gradio as gr  # type: ignore[import-untyped]
 
-from . import runners
+from . import flow_view, runners
 from .broken_registries import DEFECTS
 from .cost_guard import CostGuard
 
@@ -74,30 +76,70 @@ def _format_live_chunk(chunk: dict) -> str:
     return " ".join(parts)
 
 
-def _run_deterministic_ui(topic: str, steps: list[str]) -> tuple[str, dict]:
-    result = on_run_deterministic(topic, steps)
-    return _format_summary(result), result["artifacts"]
+def _animate(result: dict, topic: str, delay: float) -> Iterator[tuple[str, str, dict]]:
+    """Rejoue une exécution image par image : schéma animé, déroulé et artefacts visibles."""
+    frames = flow_view.frames_from_log(
+        result["log"], result["artifacts"], topic, result["status"], result.get("stop_reason")
+    )
+    for index, frame in enumerate(frames):
+        lines = [f"{i}. {f.text}" for i, f in enumerate(frames[: index + 1], 1)]
+        visible = {key: value for key, (_, value) in frame.store.items()}
+        yield (
+            flow_view.render_flow_html(frame, frames[: index + 1], topic),
+            "\n".join(lines),
+            visible,
+        )
+        if delay > 0 and index < len(frames) - 1:
+            time.sleep(delay)
+    lines = [f"{i}. {f.text}" for i, f in enumerate(frames, 1)]
+    final_html = flow_view.render_flow_html(frames[-1] if frames else None, frames, topic)
+    yield final_html, _format_summary(result) + "\n\n" + "\n".join(lines), result["artifacts"]
 
 
-def _run_scenario_ui(scenario_id: str) -> tuple[str, dict]:
-    result = on_run_scenario(scenario_id)
-    return _format_summary(result), result["artifacts"]
+def _run_deterministic_ui(topic: str, steps: list[str], delay: float = 0.0):
+    yield from _animate(on_run_deterministic(topic, steps), topic, delay)
+
+
+def _run_scenario_ui(scenario_id: str, delay: float = 0.0):
+    scenario = {s["id"]: s for s in runners.load_scenarios()}.get(scenario_id, {})
+    topic = scenario.get("initial_context", {}).get("topic", "")
+    yield from _animate(on_run_scenario(scenario_id), topic, delay)
 
 
 def _run_live_ui(topic: str, steps: list[str]):
     log_lines: list[str] = []
     artifacts: dict = {}
+    chunks: list[dict] = []
     for chunk in on_run_live(topic, steps):
         log_lines.append(_format_live_chunk(chunk))
         artifacts = chunk.get("artifacts", artifacts)
-        yield "\n".join(log_lines), artifacts
+        chunks.append(chunk)
+        frames = flow_view.frames_from_live(chunks, topic)
+        current = frames[-1] if frames else None
+        yield flow_view.render_flow_html(current, frames, topic), "\n".join(log_lines), artifacts
 
 
-def _run_guardrail_ui(defect: str) -> str:
+def _run_guardrail_ui(defect: str, delay: float = 0.0):
     result = on_run_guardrail(defect)
-    return _format_summary(result) + "\n\njournal :\n" + "\n".join(
-        f"- {entry['agent_id']} : {entry['message']}" for entry in result["log"]
-    )
+    for html_view, lines, _ in _animate(result, "démo garde-fou", delay):
+        yield html_view, lines
+
+
+def _compare_deterministic_ui(topic: str, steps: list[str]) -> tuple[str, dict]:
+    result = on_run_deterministic(topic, steps)
+    return _format_summary(result), result["artifacts"]
+
+
+def _compare_live_ui(topic: str, steps: list[str]):
+    for _, lines, artifacts in _run_live_ui(topic, steps):
+        yield lines, artifacts
+
+
+def _guardrail_handler(defect: str):
+    def handler(delay: float):
+        yield from _run_guardrail_ui(defect, delay)
+
+    return handler
 
 
 def build_app() -> gr.Blocks:
@@ -105,6 +147,8 @@ def build_app() -> gr.Blocks:
         gr.Markdown("# Kaldera — orchestration multi-agents, en direct")
 
         with gr.Tab("Exécuter"):
+            flow_html = gr.HTML(flow_view.render_flow_html(None), label="Architecture en direct")
+            speed = gr.Slider(0.0, 2.0, value=0.8, step=0.1, label="Vitesse : secondes par étape")
             topic_box = gr.Textbox(label="Sujet", value="lancement produit")
             steps_box = gr.CheckboxGroup(choices=STEPS_CHOICES, value=STEPS_CHOICES, label="Étapes")
             with gr.Row():
@@ -123,16 +167,25 @@ def build_app() -> gr.Blocks:
             output_log = gr.Textbox(label="Déroulé", lines=10)
             output_artifacts = gr.JSON(label="Artefacts")
 
-            det_button.click(_run_deterministic_ui, [topic_box, steps_box], [output_log, output_artifacts])
-            live_button.click(_run_live_ui, [topic_box, steps_box], [output_log, output_artifacts])
-            scenario_button.click(_run_scenario_ui, [scenario_dropdown], [output_log, output_artifacts])
+            run_outputs = [flow_html, output_log, output_artifacts]
+            det_button.click(_run_deterministic_ui, [topic_box, steps_box, speed], run_outputs)
+            live_button.click(_run_live_ui, [topic_box, steps_box], run_outputs)
+            scenario_button.click(_run_scenario_ui, [scenario_dropdown, speed], run_outputs)
 
         with gr.Tab("Casser un garde-fou"):
             gr.Markdown("Toujours déterministe : gratuit, instantané, rejouable à l'infini.")
+            guardrail_flow = gr.HTML(flow_view.render_flow_html(None), label="Où le flux casse")
+            guardrail_speed = gr.Slider(
+                0.0, 2.0, value=0.8, step=0.1, label="Vitesse : secondes par étape"
+            )
             guardrail_output = gr.Textbox(label="Résultat", lines=12)
             for defect in DEFECTS:
                 button = gr.Button(GUARDRAIL_LABELS[defect])
-                button.click(lambda d=defect: _run_guardrail_ui(d), outputs=guardrail_output)
+                button.click(
+                    _guardrail_handler(defect),
+                    inputs=guardrail_speed,
+                    outputs=[guardrail_flow, guardrail_output],
+                )
 
         with gr.Tab("Comparer"):
             cmp_topic = gr.Textbox(label="Sujet", value="lancement produit")
@@ -149,14 +202,27 @@ def build_app() -> gr.Blocks:
                     cmp_live_output = gr.Textbox(label="Déroulé", lines=10)
                     cmp_live_artifacts = gr.JSON(label="Artefacts")
 
-            cmp_det_button.click(_run_deterministic_ui, [cmp_topic, cmp_steps], [cmp_det_output, cmp_det_artifacts])
-            cmp_live_button.click(_run_live_ui, [cmp_topic, cmp_steps], [cmp_live_output, cmp_live_artifacts])
+            cmp_det_button.click(
+                _compare_deterministic_ui,
+                [cmp_topic, cmp_steps],
+                [cmp_det_output, cmp_det_artifacts],
+            )
+            cmp_live_button.click(
+                _compare_live_ui, [cmp_topic, cmp_steps], [cmp_live_output, cmp_live_artifacts]
+            )
 
     return demo
 
 
 def main() -> None:
-    build_app().launch(server_name="0.0.0.0", server_port=7860)
+    # En local : 127.0.0.1, adresse qu'un navigateur sait ouvrir (http://localhost:7860), et
+    # interface non exposée au réseau. Le conteneur (Dockerfile.web) fixe GRADIO_SERVER_NAME=0.0.0.0
+    # pour être joignable depuis l'extérieur ; 0.0.0.0 n'est pas une adresse ouvrable dans un
+    # navigateur (ERR_ADDRESS_INVALID).
+    host = os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1")
+    port = int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
+    print(f"Kaldera : ouvre http://localhost:{port} dans ton navigateur.", flush=True)
+    build_app().launch(server_name=host, server_port=port)
 
 
 if __name__ == "__main__":

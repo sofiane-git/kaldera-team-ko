@@ -87,7 +87,14 @@ uv sync --extra webapp
 uv run python -m kaldera.webapp.app
 ```
 
-Ouvre `http://localhost:7860`.
+Ouvre `http://localhost:7860` (et non `http://0.0.0.0:7860`, que le navigateur refuse). Si le
+port est déjà pris, une instance tourne déjà : utilise-la, ou arrête-la (Ctrl+C) avant de relancer.
+
+**Architecture en direct.** En tête des onglets « Exécuter » et « Casser un garde-fou », un schéma
+animé montre l'équipe (demande, chef, quatre sub-agents, état partagé, fin ou arrêt) et, étape par
+étape, **par où passe la donnée** : la flèche active s'allume, un point la parcourt dans le sens
+de la donnée, une étiquette dit ce qui est transporté, et l'état partagé se remplit à chaque
+réception acceptée. Le curseur règle la vitesse (secondes par étape). Code : `src/kaldera/webapp/flow_view.py`.
 
 **En production :** `<URL Azure Container Apps — à renseigner après le premier déploiement, voir
 doc/guides/deploiement_azure_portail.md>`. Démarrage à froid possible (scale-to-zero) : ouvrir
